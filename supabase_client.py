@@ -214,3 +214,112 @@ def fetch_feed(department: str | None = None):
     """
     Old signature powered "What's New on Campus" — a resource feed. No
     such feed/table exists in the real schema. This repurposes the slot
+    for sponsored content via fn_get_ads_for_device, reshaped into the
+    old resource-card format so the existing UI keeps working. Ad
+    impression recording happens once, here, the first time each ad is
+    fetched in a session — matching the doc's "record once per render"
+    guidance without threading impression-tracking through every caller.
+    """
+    device_token = st.session_state.get("device_token")
+    if not device_token:
+        return []
+    ads = _rpc("fn_get_ads_for_device", {"p_device_token": device_token, "p_limit": 3})
+    if isinstance(ads, dict) and "__error__" in ads:
+        return []
+    ads = ads or []
+
+    if "_ads_shown" not in st.session_state:
+        st.session_state["_ads_shown"] = set()
+    for ad in ads:
+        if ad["ad_id"] not in st.session_state["_ads_shown"]:
+            _rpc("fn_record_ad_impression", {"p_ad_id": ad["ad_id"], "p_device_token": device_token})
+            st.session_state["_ads_shown"].add(ad["ad_id"])
+
+    return [
+        {
+            "id": ad["ad_id"],
+            "title": ad.get("title", "Sponsored"),
+            "course_code": "Sponsored",
+            "file_type": "ad",
+            "cta_url": ad.get("cta_url", "#"),
+        }
+        for ad in ads
+    ]
+
+
+def fetch_saved(student_id: str = "demo-student"):
+    """
+    No bookmarks table/RPC exists in the real schema. This reads from
+    st.session_state instead — a real, working feature, just scoped to
+    the current browser session rather than persisted server-side.
+    Honest about the limitation rather than silently returning nothing.
+    """
+    return st.session_state.get("_session_bookmarks", [])
+
+
+def save_bookmark(resource: dict):
+    """Session-local save — see fetch_saved()'s docstring."""
+    saved = st.session_state.get("_session_bookmarks", [])
+    if not any(r["id"] == resource["id"] for r in saved):
+        saved.append(resource)
+    st.session_state["_session_bookmarks"] = saved
+
+
+def fetch_resource(resource_id: str):
+    """
+    Old signature fetched one resource by id for the Viewer screen. The
+    real schema's links don't support a standalone by-id lookup outside
+    a node context, so this checks session state first (covers the
+    Home-feed-ad and Saved-list paths, which already hold the full
+    object) and falls back to a placeholder shape if the id is unknown
+    — matching the old function's graceful-fallback behavior.
+    """
+    for bucket_key in ("_last_opened_resource", "_session_bookmarks"):
+        bucket = st.session_state.get(bucket_key)
+        if isinstance(bucket, dict) and bucket.get("id") == resource_id:
+            return bucket
+        if isinstance(bucket, list):
+            for r in bucket:
+                if r["id"] == resource_id:
+                    return r
+    return {"id": resource_id, "title": "Resource", "course_code": "—", "file_type": "link"}
+
+
+def search_courses(query: str):
+    """
+    Old signature searched courses by name. Real search covers the
+    whole tree (nodes AND links) via fn_search_tree — this filters the
+    combined results down to node-type hits only and reshapes them to
+    the old {id, code, name} card format, so course-style search
+    results keep working; link-type hits are available via the real
+    search_tree() below for screens that want the full picture.
+    """
+    if not query:
+        return []
+    result = _rpc("fn_search_tree", {"search_query": query, "result_limit": 25})
+    if isinstance(result, dict) and "__error__" in result:
+        return []
+    node_hits = [r for r in (result or []) if r.get("result_type") == "node"]
+    return [{"id": r["id"], "code": r.get("node_path", "")[:12], "name": r.get("title", "")} for r in node_hits]
+
+
+# ---------------------------------------------------------------------
+# Real-schema functions, exposed directly for screens that need the
+# actual tree/link shape rather than the old-format shims above.
+# ---------------------------------------------------------------------
+
+def fetch_children_as_resources(node_id: str):
+    """
+    Used by Course Detail: if the node has children, return them
+    reshaped as course-cards to keep drilling; if it's a leaf, return
+    its links reshaped as resource-cards. Course Detail's existing
+    logic already branches on "is this a folder or a resource list" —
+    this just gives it real data to branch on instead of a flat filter.
+    """
+    children = _fetch_child_nodes(node_id)
+    if children:
+        return "nodes", [_node_to_course_shape(n) for n in children]
+    node = _fetch_node(node_id)
+    node_name = node.get("name", "") if node else ""
+    links = _fetch_unit_links(node_id)
+    return "links", [_link_to_resource_shape(link, node_name) for link in links]
