@@ -1,5 +1,5 @@
 import streamlit as st
-from supabase_client import fetch_active_courses, fetch_recently_viewed, fetch_feed, search_courses
+from supabase_client import fetch_active_courses, fetch_recently_viewed, fetch_feed, search_courses, show_debug_panel
 from ui_components import inject_base_css, resource_card, bottom_nav, wordmark
 
 st.set_page_config(page_title="Home | Switch", page_icon="🟠", layout="centered", initial_sidebar_state="collapsed")
@@ -55,4 +55,5 @@ for resource in feed:
     resource_card(resource, key_prefix="feed")
 
 st.write("")
+show_debug_panel()
 bottom_nav(active="Home")
