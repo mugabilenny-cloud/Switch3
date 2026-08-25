@@ -1,0 +1,13 @@
+{
+  "name": "Switch",
+  "short_name": "Switch",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#E85D2C",
+  "description": "Crowdsourced course notes for KIU students.",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
